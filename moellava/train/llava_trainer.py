@@ -160,7 +160,10 @@ class LLaVATrainer(Trainer):
         #     return super().create_optimizer()
 
         opt_model = self.model
-
+        for n, p in opt_model.named_parameters():
+            if "deepspeed_moe" in n :
+                p.requires_grad = True
+                    
         if self.optimizer is None:
             decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -215,6 +218,10 @@ class LLaVATrainer(Trainer):
                         "name": "no_decay_parameters"
                     },
                 ]
+           
+            for n, p in opt_model.named_parameters():
+                if hasattr(p, "allreduce"):
+                    print(p.allreduce, n)
             # import ipdb
             # ipdb.set_trace()
             # print('self.args.moe_enable', self.args.moe_enable)
