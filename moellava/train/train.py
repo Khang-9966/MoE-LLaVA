@@ -40,7 +40,9 @@ from moellava.mm_utils import tokenizer_image_token
 
 from PIL import Image
 from moellava.utils import order_pick_k
-
+from transformers import Seq2SeqTrainer, TrainerCallback, TrainingArguments, TrainerState, TrainerControl
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+        
 local_rank = None
 
 
@@ -1521,12 +1523,36 @@ def train():
             rank0_print(name)
     rank0_print(model)
     # sys.exit()
-
+    # model.config.save_pretrained(training_args.output_dir)
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
+    class SavePeftModelCallback(TrainerCallback):
+        def on_save(
+            self,
+            args: TrainingArguments,
+            state: TrainerState,
+            control: TrainerControl,
+            **kwargs,
+        ):
+            SAVE_DIR = training_args.output_dir + "/checkpoint-"+str(state.global_step) 
+            if training_args.lora_enable and not model_args.moe_enable:
+                state_dict = get_peft_state_maybe_zero_3(
+                    kwargs["model"].named_parameters(), training_args.lora_bias
+                )
+                non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
+                    kwargs["model"].named_parameters()
+                )
+                if training_args.local_rank == 0 or training_args.local_rank == -1:
+                    kwargs["model"].config.save_pretrained(SAVE_DIR)
+                    kwargs["model"].save_pretrained(SAVE_DIR, state_dict=state_dict)
+                    torch.save(non_lora_state_dict, os.path.join(SAVE_DIR, 'non_lora_trainables.bin'))
+                    
+            return control
+            
     trainer = LLaVATrainer(model=model,
                     tokenizer=tokenizer,
                     args=training_args,
+                    callbacks=[SavePeftModelCallback],
                     **data_module)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
